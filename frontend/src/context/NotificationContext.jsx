@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useAuth } from './AuthContext';
 import { useSocket } from './SocketContext';
+import { useOrganization } from './OrganizationContext';
 import {
   getNotifications,
   markNotificationAsRead,
@@ -11,6 +12,7 @@ const NotificationContext = createContext(null);
 
 export function NotificationProvider({ children }) {
   const { user } = useAuth();
+  const { activeOrgId } = useOrganization();
   const { socket, addToast } = useSocket();
 
   const [notifications, setNotifications] = useState([]);
@@ -18,9 +20,9 @@ export function NotificationProvider({ children }) {
   const [loading, setLoading] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
 
-  // Fetch notifications from backend
+  // Fetch notifications from backend scoped to active organization
   const fetchNotifications = useCallback(async () => {
-    if (!user) {
+    if (!user || !activeOrgId) {
       setNotifications([]);
       setUnreadCount(0);
       return;
@@ -38,21 +40,20 @@ export function NotificationProvider({ children }) {
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [user, activeOrgId]);
 
-  // Initial fetch and user sync
+  // Immediately clear stale notifications and fetch on active organization change
   useEffect(() => {
+    setNotifications([]);
+    setUnreadCount(0);
     fetchNotifications();
-  }, [fetchNotifications]);
+  }, [activeOrgId, fetchNotifications]);
 
   // Real-time Socket.IO connection & event listeners
   useEffect(() => {
     if (!socket || !user) return;
 
-    // Join authenticated user's room
-    socket.emit('join:user', user._id || user.id);
-
-    // Handler for targeted and broadcast notifications
+    // Handler for targeted notifications
     const handleIncomingNotification = (newNotif) => {
       if (!newNotif) return;
 
@@ -79,18 +80,15 @@ export function NotificationProvider({ children }) {
     };
 
     socket.on('notification:new', handleIncomingNotification);
-    socket.on('notification:created', handleIncomingNotification);
 
     return () => {
       socket.off('notification:new', handleIncomingNotification);
-      socket.off('notification:created', handleIncomingNotification);
     };
   }, [socket, user, addToast]);
 
   // Mark single notification as read
   const markAsRead = async (id) => {
     try {
-      // Optimistic update
       setNotifications((prev) =>
         prev.map((n) => (n._id === id ? { ...n, isRead: true } : n))
       );
@@ -102,7 +100,6 @@ export function NotificationProvider({ children }) {
       }
     } catch (err) {
       console.error('[NotificationContext] Failed to mark notification as read:', err);
-      // Rollback by refetching
       fetchNotifications();
     }
   };
@@ -110,7 +107,6 @@ export function NotificationProvider({ children }) {
   // Mark all notifications as read
   const markAllAsRead = async () => {
     try {
-      // Optimistic update
       setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
       setUnreadCount(0);
 

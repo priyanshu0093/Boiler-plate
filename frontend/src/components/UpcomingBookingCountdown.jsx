@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { getMyBookings, checkInBooking, checkOutBooking } from '../api/client';
 import { useSocket } from '../context/SocketContext';
+import { useOrganization } from '../context/OrganizationContext';
 import {
   Calendar,
   Clock,
@@ -14,6 +15,7 @@ import {
 
 export default function UpcomingBookingCountdown({ onBrowseResources, onBookingUpdated }) {
   const { socket, addToast } = useSocket();
+  const { activeOrgId } = useOrganization();
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(() => new Date());
@@ -28,9 +30,16 @@ export default function UpcomingBookingCountdown({ onBrowseResources, onBookingU
     return () => clearInterval(timer);
   }, []);
 
-  // Fetch bookings for the logged-in user
+  // Fetch bookings for the logged-in user in active organization
   const fetchBookings = useCallback(async () => {
+    if (!activeOrgId) {
+      setBookings([]);
+      setLoading(false);
+      return;
+    }
+
     try {
+      setLoading(true);
       const res = await getMyBookings();
       if (res && res.success && Array.isArray(res.data)) {
         setBookings(res.data);
@@ -40,11 +49,12 @@ export default function UpcomingBookingCountdown({ onBrowseResources, onBookingU
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeOrgId]);
 
   useEffect(() => {
+    setBookings([]);
     fetchBookings();
-  }, [fetchBookings]);
+  }, [activeOrgId, fetchBookings]);
 
   // Real-time updates via Socket.IO
   useEffect(() => {

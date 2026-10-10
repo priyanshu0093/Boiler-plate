@@ -1,16 +1,34 @@
-# React + Vite
+# Boiler Plate Frontend — React 19 + Vite
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+The client application for Boiler Plate SaaS, an internal office resource and asset booking platform.
 
-Currently, two official plugins are available:
+## Features
+- **Organization Switcher**: Dynamic tenant switcher in navigation bar.
+- **Real-Time Updates**: Socket.IO integration for live booking notifications and resource status transitions.
+- **Company Operations Dashboard**: Capacity indicators tracking 10-resource and 15-member quotas.
+- **Platform Super Admin Console**: Distinct `/platform-admin` management interface for platform administrators.
+- **Workspace Onboarding & Email Invites**: Self-serve registration, invitation preview links, and instant acceptance.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Local Development
 
-## React Compiler
+### 1. Install Dependencies
+```bash
+npm install
+```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### 2. Start Development Server
+```bash
+npm run dev
+```
+Runs at `http://localhost:5173`. Connects to the backend at `http://localhost:5000`.
 
-## Expanding the Oxlint configuration
+### 3. Run Linter
+```bash
+npm run lint
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+### 4. Build for Production
+```bash
+npm run build
+```
+Generates production assets in `dist/`.

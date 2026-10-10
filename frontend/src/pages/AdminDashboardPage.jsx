@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { getAdminAnalytics } from '../api/client';
 import { useSocket } from '../context/SocketContext';
+import { useOrganization } from '../context/OrganizationContext';
 import StatusBadge from '../components/StatusBadge';
 import {
   Boxes,
@@ -19,12 +20,19 @@ import {
 
 export default function AdminDashboardPage() {
   const { socket } = useSocket();
+  const { activeOrgId, activeOrganization } = useOrganization();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [scheduleTab, setScheduleTab] = useState('TODAY'); // 'TODAY' | 'UPCOMING'
 
   const fetchAnalytics = useCallback(async () => {
+    if (!activeOrgId) {
+      setData(null);
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
@@ -38,11 +46,13 @@ export default function AdminDashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeOrgId]);
 
+  // Immediately clear stale analytics on tenant switch
   useEffect(() => {
+    setData(null);
     fetchAnalytics();
-  }, [fetchAnalytics]);
+  }, [activeOrgId, fetchAnalytics]);
 
   // Real-time synchronization on resource status or booking updates
   useEffect(() => {
@@ -154,6 +164,13 @@ export default function AdminDashboardPage() {
               Resources <ArrowUpRight size={14} />
             </Link>
             <Link
+              to="/admin/members"
+              className="btn-secondary"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5 }}
+            >
+              Members <ArrowUpRight size={14} />
+            </Link>
+            <Link
               to="/admin/bookings"
               className="btn-primary"
               style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5 }}
@@ -163,6 +180,182 @@ export default function AdminDashboardPage() {
           </div>
         </div>
       </header>
+
+      {/* Suspended Workspace Warning Banner */}
+      {(data?.planLimits?.status === 'SUSPENDED' || activeOrganization?.status === 'SUSPENDED') && (
+        <div
+          style={{
+            padding: '14px 18px',
+            backgroundColor: '#FEF2F2',
+            border: '1px solid #FEE2E2',
+            borderRadius: 'var(--radius-md)',
+            color: '#B91C1C',
+            marginBottom: 24,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            fontSize: 13.5
+          }}
+        >
+          <div style={{ fontWeight: 700 }}>WORKSPACE SUSPENDED:</div>
+          <span>
+            This workspace has been suspended by platform administration. Resource creation, invitations, and bookings are prohibited.
+          </span>
+        </div>
+      )}
+
+      {/* Free Plan Capacity & Quota Card */}
+      {data?.planLimits && (
+        <div
+          style={{
+            backgroundColor: 'var(--bg-surface)',
+            border: '1px solid var(--border-light)',
+            borderRadius: 'var(--radius-lg)',
+            padding: '20px 24px',
+            marginBottom: 28,
+            boxShadow: 'var(--shadow-card)'
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 12,
+              marginBottom: 16
+            }}
+          >
+            <div>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                  color: '#2563EB',
+                  backgroundColor: 'rgba(37, 99, 235, 0.08)',
+                  padding: '3px 8px',
+                  borderRadius: 'var(--radius-full)'
+                }}
+              >
+                Free Plan Quota
+              </span>
+              <h2 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', marginTop: 6 }}>
+                Workspace Capacity & Policy Limits
+              </h2>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+              Demo limits enforced across resources and teammates
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+              gap: 20
+            }}
+          >
+            {/* Resources Quota */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
+                <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Active Resources</span>
+                <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>
+                  {data.planLimits.currentResources} / {data.planLimits.maxResources}
+                </span>
+              </div>
+              <div
+                style={{
+                  width: '100%',
+                  height: 8,
+                  backgroundColor: 'var(--bg-subtle)',
+                  borderRadius: 'var(--radius-full)',
+                  overflow: 'hidden'
+                }}
+              >
+                <div
+                  style={{
+                    height: '100%',
+                    width: `${data.planLimits.resourceCapacityPct}%`,
+                    backgroundColor:
+                      data.planLimits.resourceCapacityPct >= 100 ? '#DC2626' : '#2563EB',
+                    borderRadius: 'var(--radius-full)',
+                    transition: 'width 0.3s ease'
+                  }}
+                />
+              </div>
+              <span style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4, display: 'block' }}>
+                {data.planLimits.maxResources - data.planLimits.currentResources} resource slots remaining
+              </span>
+            </div>
+
+            {/* Members Quota */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
+                <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Team Members</span>
+                <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>
+                  {data.planLimits.currentMembers} / {data.planLimits.maxMembers}
+                </span>
+              </div>
+              <div
+                style={{
+                  width: '100%',
+                  height: 8,
+                  backgroundColor: 'var(--bg-subtle)',
+                  borderRadius: 'var(--radius-full)',
+                  overflow: 'hidden'
+                }}
+              >
+                <div
+                  style={{
+                    height: '100%',
+                    width: `${data.planLimits.memberCapacityPct}%`,
+                    backgroundColor:
+                      data.planLimits.memberCapacityPct >= 100 ? '#DC2626' : '#15803D',
+                    borderRadius: 'var(--radius-full)',
+                    transition: 'width 0.3s ease'
+                  }}
+                />
+              </div>
+              <span style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4, display: 'block' }}>
+                {data.planLimits.maxMembers - data.planLimits.currentMembers} member slots remaining
+              </span>
+            </div>
+
+            {/* Advance Booking Window */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
+                <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Advance Booking Window</span>
+                <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>
+                  7 Days Max
+                </span>
+              </div>
+              <div
+                style={{
+                  width: '100%',
+                  height: 8,
+                  backgroundColor: 'var(--bg-subtle)',
+                  borderRadius: 'var(--radius-full)',
+                  overflow: 'hidden'
+                }}
+              >
+                <div
+                  style={{
+                    height: '100%',
+                    width: '100%',
+                    backgroundColor: '#D97706',
+                    borderRadius: 'var(--radius-full)'
+                  }}
+                />
+              </div>
+              <span style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4, display: 'block' }}>
+                Prevents indefinite distant reservations
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Primary KPI Metric Blocks */}
       <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginBottom: 28 }}>

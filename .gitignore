@@ -23,6 +23,19 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Database Backups & Dumps
+backups/
+*/backups/
+*.dump
+*.sql
+*.backup.json
+
+# Credentials & Keys
+*.pem
+*.key
+*.cert
+tokens.json
+
 # OS and Editor files
 .DS_Store
 .idea/

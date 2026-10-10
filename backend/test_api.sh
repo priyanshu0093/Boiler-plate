@@ -9,7 +9,7 @@ echo "Health: $HEALTH_RES"
 echo -e "\n=== 2. TEST REGISTER ==="
 REG_RES=$(curl -s -X POST "$BASE_URL/api/auth/register" \
   -H "Content-Type: application/json" \
-  -d '{"name":"Jordan Lee","email":"jordan.lee@deskdrop.internal","password":"password123"}')
+  -d '{"name":"Jordan Lee","email":"jordan.lee@deskdrop.internal","password":"Password123!"}')
 echo "Register: $REG_RES"
 
 echo -e "\n=== 3. TEST LOGIN ==="

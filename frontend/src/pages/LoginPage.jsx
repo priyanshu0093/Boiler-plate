@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, Navigate, Link, useLocation } from 'react-router-dom';
 import { AlertCircle, CheckCircle } from 'lucide-react';
+import PasswordInput from '../components/PasswordInput';
 
 export default function LoginPage() {
   const { login, isAuthenticated } = useAuth();
@@ -52,7 +53,7 @@ export default function LoginPage() {
     <div className="auth-page">
       <div className="auth-card">
         <div className="auth-header">
-          <h1 className="auth-brand">DeskDrop</h1>
+          <h1 className="auth-brand">Boiler Plate</h1>
           <p className="auth-subtitle">Internal Office Resource & Asset Booking</p>
         </div>
 
@@ -105,7 +106,7 @@ export default function LoginPage() {
               id="email"
               type="email"
               className="form-input"
-              placeholder="name@deskdrop.internal"
+              placeholder="name@boilerplate.internal"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               autoComplete="email"
@@ -117,10 +118,8 @@ export default function LoginPage() {
             <label className="form-label" htmlFor="password">
               Password
             </label>
-            <input
+            <PasswordInput
               id="password"
-              type="password"
-              className="form-input"
               placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}

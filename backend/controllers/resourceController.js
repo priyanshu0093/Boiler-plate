@@ -1,15 +1,37 @@
+const mongoose = require('mongoose');
 const { Resource, RESOURCE_CATEGORIES, RESOURCE_STATUSES } = require('../models/Resource');
 const { Booking } = require('../models/Booking');
 const { emitResourceStatusChanged } = require('../socket/socketHandler');
+const { getPlanLimits } = require('../config/planLimits');
 
-// @desc    Get all resources with optional filtering
+// Concurrency mutex lock per organization for resource creation and quota enforcement
+const orgResourceLocks = new Map();
+const acquireOrgResourceLock = async (orgId) => {
+  const key = orgId.toString();
+  while (orgResourceLocks.has(key)) {
+    await orgResourceLocks.get(key);
+  }
+  let release;
+  const promise = new Promise((resolve) => {
+    release = resolve;
+  });
+  orgResourceLocks.set(key, promise);
+  return () => {
+    orgResourceLocks.delete(key);
+    release();
+  };
+};
+
+// @desc    Get all resources with optional filtering (scoped to tenant organization)
 // @route   GET /api/resources
 // @access  Public (or authenticated)
 const getResources = async (req, res, next) => {
   try {
     const { category, status, search, includeInactive } = req.query;
 
-    const query = {};
+    const query = {
+      organizationId: req.organization._id
+    };
 
     // Default to active resources unless specifically requested
     if (includeInactive !== 'true') {
@@ -41,10 +63,14 @@ const getResources = async (req, res, next) => {
     }
 
     if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
-        { location: { $regex: search, $options: 'i' } }
+      query.$and = [
+        {
+          $or: [
+            { name: { $regex: search, $options: 'i' } },
+            { description: { $regex: search, $options: 'i' } },
+            { location: { $regex: search, $options: 'i' } }
+          ]
+        }
       ];
     }
 
@@ -60,12 +86,22 @@ const getResources = async (req, res, next) => {
   }
 };
 
-// @desc    Get single resource by ID
+// @desc    Get single resource by ID (scoped to tenant organization)
 // @route   GET /api/resources/:id
 // @access  Public (or authenticated)
 const getResourceById = async (req, res, next) => {
   try {
-    const resource = await Resource.findById(req.params.id);
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid resource ID format'
+      });
+    }
+
+    const resource = await Resource.findOne({
+      _id: req.params.id,
+      organizationId: req.organization._id
+    });
 
     if (!resource) {
       return res.status(404).json({
@@ -74,9 +110,10 @@ const getResourceById = async (req, res, next) => {
       });
     }
 
-    // Include upcoming active/confirmed bookings for schedule visibility
+    // Include upcoming active/confirmed bookings for schedule visibility within tenant
     const upcomingBookings = await Booking.find({
       resourceId: resource._id,
+      organizationId: req.organization._id,
       status: { $in: ['CONFIRMED', 'ACTIVE'] },
       endTime: { $gt: new Date() }
     })
@@ -96,14 +133,17 @@ const getResourceById = async (req, res, next) => {
   }
 };
 
-// @desc    Create a new resource
+// @desc    Create a new resource (scoped to tenant organization)
 // @route   POST /api/resources
-// @access  Private (Employee)
+// @access  Private (Org Admin / Owner / Platform Admin)
 const createResource = async (req, res, next) => {
+  const releaseLock = await acquireOrgResourceLock(req.organization._id);
+
   try {
     const { name, category, description, location, image, specifications, status } = req.body;
 
     if (!name || !category || !description || !location) {
+      releaseLock();
       return res.status(400).json({
         success: false,
         message: 'Please provide name, category, description, and location'
@@ -112,9 +152,30 @@ const createResource = async (req, res, next) => {
 
     const upperCategory = category.toUpperCase();
     if (!RESOURCE_CATEGORIES.includes(upperCategory)) {
+      releaseLock();
       return res.status(400).json({
         success: false,
         message: `Invalid category: ${category}. Allowed categories: ${RESOURCE_CATEGORIES.join(', ')}`
+      });
+    }
+
+    // Free plan quota enforcement: maximum active resources per organization
+    const limits = getPlanLimits(req.organization.plan);
+    const activeCount = await Resource.countDocuments({
+      organizationId: req.organization._id,
+      isActive: true
+    });
+
+    if (activeCount >= limits.maxResources) {
+      releaseLock();
+      return res.status(400).json({
+        success: false,
+        code: 'RESOURCE_LIMIT_EXCEEDED',
+        message: `Free plan limit reached: Maximum ${limits.maxResources} active resources allowed per organization. Deactivate an existing resource to add more.`,
+        data: {
+          current: activeCount,
+          limit: limits.maxResources
+        }
       });
     }
 
@@ -122,6 +183,7 @@ const createResource = async (req, res, next) => {
     if (status) {
       const upperStatus = status.toUpperCase();
       if (!RESOURCE_STATUSES.includes(upperStatus)) {
+        releaseLock();
         return res.status(400).json({
           success: false,
           message: `Invalid status: ${status}. Allowed statuses: ${RESOURCE_STATUSES.join(', ')}`
@@ -131,6 +193,7 @@ const createResource = async (req, res, next) => {
     }
 
     const resource = await Resource.create({
+      organizationId: req.organization._id,
       name: name.trim(),
       category: upperCategory,
       description: description.trim(),
@@ -141,21 +204,34 @@ const createResource = async (req, res, next) => {
       isActive: true
     });
 
+    releaseLock();
+
     res.status(201).json({
       success: true,
       data: resource
     });
   } catch (error) {
+    releaseLock();
     next(error);
   }
 };
 
-// @desc    Update resource details or status (e.g., MAINTENANCE)
+// @desc    Update resource details or status (scoped to tenant organization)
 // @route   PATCH /api/resources/:id
-// @access  Private (Employee)
+// @access  Private (Org Admin / Owner / Platform Admin)
 const updateResource = async (req, res, next) => {
   try {
-    const resource = await Resource.findById(req.params.id);
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid resource ID format'
+      });
+    }
+
+    const resource = await Resource.findOne({
+      _id: req.params.id,
+      organizationId: req.organization._id
+    });
 
     if (!resource) {
       return res.status(404).json({
@@ -165,6 +241,27 @@ const updateResource = async (req, res, next) => {
     }
 
     const { name, category, description, location, image, specifications, status, isActive } = req.body;
+
+    // If reactivating an inactive resource, enforce plan limits
+    if (isActive === true && resource.isActive === false) {
+      const limits = getPlanLimits(req.organization.plan);
+      const activeCount = await Resource.countDocuments({
+        organizationId: req.organization._id,
+        isActive: true
+      });
+
+      if (activeCount >= limits.maxResources) {
+        return res.status(400).json({
+          success: false,
+          code: 'RESOURCE_LIMIT_EXCEEDED',
+          message: `Free plan limit reached: Maximum ${limits.maxResources} active resources allowed per organization. Deactivate an existing resource before reactivating this one.`,
+          data: {
+            current: activeCount,
+            limit: limits.maxResources
+          }
+        });
+      }
+    }
 
     if (name) resource.name = name.trim();
     if (description) resource.description = description.trim();
@@ -194,7 +291,6 @@ const updateResource = async (req, res, next) => {
         });
       }
 
-      // If putting under maintenance, verify or mark
       if (upperStatus !== resource.status) {
         resource.status = upperStatus;
         statusChanged = true;
@@ -205,6 +301,7 @@ const updateResource = async (req, res, next) => {
 
     if (statusChanged) {
       emitResourceStatusChanged({
+        organizationId: req.organization._id,
         resourceId: resource._id,
         status: resource.status,
         timestamp: new Date()
@@ -220,12 +317,22 @@ const updateResource = async (req, res, next) => {
   }
 };
 
-// @desc    Delete or deactivate a resource
+// @desc    Delete or deactivate a resource (scoped to tenant organization)
 // @route   DELETE /api/resources/:id
-// @access  Private (Employee)
+// @access  Private (Org Admin / Owner / Platform Admin)
 const deleteResource = async (req, res, next) => {
   try {
-    const resource = await Resource.findById(req.params.id);
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid resource ID format'
+      });
+    }
+
+    const resource = await Resource.findOne({
+      _id: req.params.id,
+      organizationId: req.organization._id
+    });
 
     if (!resource) {
       return res.status(404).json({
@@ -234,9 +341,10 @@ const deleteResource = async (req, res, next) => {
       });
     }
 
-    // Check if there are active or upcoming bookings
+    // Check if there are active or upcoming bookings within this tenant
     const activeBooking = await Booking.findOne({
       resourceId: resource._id,
+      organizationId: req.organization._id,
       status: { $in: ['CONFIRMED', 'ACTIVE'] },
       endTime: { $gt: new Date() }
     });

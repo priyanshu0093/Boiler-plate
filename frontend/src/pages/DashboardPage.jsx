@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useOrganization } from '../context/OrganizationContext';
 import { useSocket } from '../context/SocketContext';
 import { getResources } from '../api/client';
 import SearchBar from '../components/SearchBar';
@@ -11,6 +12,7 @@ import UpcomingBookingCountdown from '../components/UpcomingBookingCountdown';
 
 export default function DashboardPage() {
   const { user } = useAuth();
+  const { activeOrgId, activeOrganization } = useOrganization();
   const { socket } = useSocket();
 
   const [resources, setResources] = useState([]);
@@ -37,8 +39,14 @@ export default function DashboardPage() {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Fetch resources from backend
+  // Fetch resources from backend scoped to active organization
   const fetchResources = useCallback(async () => {
+    if (!activeOrgId) {
+      setResources([]);
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
@@ -56,11 +64,15 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedCategory, selectedStatus, debouncedSearch]);
+  }, [activeOrgId, selectedCategory, selectedStatus, debouncedSearch]);
 
+  // Immediately clear previous organization's resources on tenant switch
   useEffect(() => {
+    setResources([]);
+    setSelectedResourceId(null);
+    setBookingModalResource(null);
     fetchResources();
-  }, [fetchResources]);
+  }, [activeOrgId, fetchResources]);
 
   // REAL-TIME SOCKET.IO LISTENERS: Update affected resource/booking state without page reload
   useEffect(() => {

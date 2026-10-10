@@ -1,5 +1,8 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { Organization } = require('../models/Organization');
+const { OrganizationMember } = require('../models/OrganizationMember');
+const { validatePassword } = require('../utils/passwordValidator');
 
 const generateToken = (user) => {
   return jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
@@ -7,12 +10,36 @@ const generateToken = (user) => {
   });
 };
 
+const getUserOrganizationSummaries = async (userId) => {
+  const memberships = await OrganizationMember.find({ userId })
+    .populate('organizationId')
+    .sort({ createdAt: 1 });
+
+  return memberships
+    .filter((m) => m.organizationId && m.organizationId.status === 'ACTIVE')
+    .map((m) => ({
+      _id: m.organizationId._id,
+      name: m.organizationId.name,
+      slug: m.organizationId.slug,
+      plan: m.organizationId.plan,
+      role: m.role
+    }));
+};
+
+const generateSlug = (name) => {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+};
+
 // @desc    Register a new employee
 // @route   POST /api/auth/register
 // @access  Public
 const register = async (req, res, next) => {
   try {
-    const { name, email, password, confirmPassword } = req.body;
+    const { name, email, password, confirmPassword, organizationName } = req.body;
 
     if (!name || !name.trim() || !email || !password) {
       return res.status(400).json({
@@ -38,10 +65,12 @@ const register = async (req, res, next) => {
       });
     }
 
-    if (password.length < 6) {
+    const passwordValidation = validatePassword(password);
+    if (!passwordValidation.isValid) {
       return res.status(400).json({
         success: false,
-        message: 'Password must be at least 6 characters long'
+        message: passwordValidation.message,
+        errors: passwordValidation.errors
       });
     }
 
@@ -54,22 +83,81 @@ const register = async (req, res, next) => {
       });
     }
 
-    // Strictly enforce role: 'EMPLOYEE' - never trust client input
-    const user = await User.create({
-      name: name.trim(),
-      email: normalizedEmail,
-      password,
-      role: 'EMPLOYEE'
-    });
+    // Safe creation with cleanup rollback to avoid orphaned records
+    let user = null;
+    let createdOrg = null;
+    let createdMember = null;
+
+    try {
+      // Strictly enforce role: 'EMPLOYEE' - never trust client input
+      user = await User.create({
+        name: name.trim(),
+        email: normalizedEmail,
+        password,
+        role: 'EMPLOYEE'
+      });
+
+      if (organizationName && organizationName.trim()) {
+        let baseSlug = generateSlug(organizationName.trim()) || 'workspace';
+        let orgSlug = baseSlug;
+        const existingOrg = await Organization.findOne({ slug: orgSlug });
+        if (existingOrg) {
+          orgSlug = `${baseSlug}-${Math.random().toString(36).substring(2, 6)}`;
+        }
+
+        createdOrg = await Organization.create({
+          name: organizationName.trim(),
+          slug: orgSlug,
+          owner: user._id,
+          plan: 'FREE',
+          status: 'ACTIVE',
+          settings: { timezone: 'UTC' }
+        });
+
+        createdMember = await OrganizationMember.create({
+          organizationId: createdOrg._id,
+          userId: user._id,
+          role: 'OWNER'
+        });
+      } else {
+        // Automatically associate new user with default organization if available (legacy fallback)
+        let defaultOrg = await Organization.findOne({ slug: 'deskdrop-hq', status: 'ACTIVE' });
+        if (!defaultOrg) {
+          defaultOrg = await Organization.findOne({ status: 'ACTIVE' }).sort({ createdAt: 1 });
+        }
+        if (defaultOrg) {
+          createdMember = await OrganizationMember.create({
+            organizationId: defaultOrg._id,
+            userId: user._id,
+            role: 'MEMBER'
+          });
+        }
+      }
+    } catch (creationError) {
+      // Safe cleanup rollback on any creation failure
+      if (createdMember) {
+        await OrganizationMember.findByIdAndDelete(createdMember._id).catch(() => {});
+      }
+      if (createdOrg) {
+        await Organization.findByIdAndDelete(createdOrg._id).catch(() => {});
+      }
+      if (user) {
+        await User.findByIdAndDelete(user._id).catch(() => {});
+      }
+      throw creationError;
+    }
 
     const token = generateToken(user);
+    const orgs = await getUserOrganizationSummaries(user._id);
 
     res.status(201).json({
       success: true,
       message: 'Employee account created successfully',
       data: {
         user,
-        token
+        token,
+        organizations: orgs,
+        activeOrganization: orgs[0] || null
       }
     });
   } catch (error) {
@@ -110,12 +198,15 @@ const login = async (req, res, next) => {
     }
 
     const token = generateToken(user);
+    const orgs = await getUserOrganizationSummaries(user._id);
 
     res.status(200).json({
       success: true,
       data: {
         user,
-        token
+        token,
+        organizations: orgs,
+        activeOrganization: orgs[0] || null
       }
     });
   } catch (error) {
@@ -135,10 +226,15 @@ const getMe = async (req, res, next) => {
         message: 'User not found'
       });
     }
+
+    const orgs = await getUserOrganizationSummaries(user._id);
+
     res.status(200).json({
       success: true,
       data: {
-        user
+        user,
+        organizations: orgs,
+        activeOrganization: orgs[0] || null
       }
     });
   } catch (error) {
@@ -151,7 +247,6 @@ const getMe = async (req, res, next) => {
 // @access  Private
 const updateProfile = async (req, res, next) => {
   try {
-    // Never trust client userId; use req.user._id
     const user = await User.findById(req.user._id);
     if (!user) {
       return res.status(404).json({
@@ -162,7 +257,6 @@ const updateProfile = async (req, res, next) => {
 
     const { name, phone, department } = req.body;
 
-    // Validate and update name
     if (name !== undefined) {
       if (typeof name !== 'string' || !name.trim()) {
         return res.status(400).json({
@@ -179,7 +273,6 @@ const updateProfile = async (req, res, next) => {
       user.name = name.trim();
     }
 
-    // Validate and update phone
     if (phone !== undefined) {
       if (typeof phone !== 'string') {
         return res.status(400).json({
@@ -197,7 +290,6 @@ const updateProfile = async (req, res, next) => {
       user.phone = trimmedPhone;
     }
 
-    // Validate and update department
     if (department !== undefined) {
       if (typeof department !== 'string') {
         return res.status(400).json({
@@ -214,9 +306,6 @@ const updateProfile = async (req, res, next) => {
       }
       user.department = trimmedDept;
     }
-
-    // Explicitly guarantee role and email cannot be changed
-    // user.role and user.email are left intact
 
     await user.save();
 

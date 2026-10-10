@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { getResources, createResource, updateResource } from '../api/client';
 import { useSocket } from '../context/SocketContext';
+import { useOrganization } from '../context/OrganizationContext';
 import StatusBadge from '../components/StatusBadge';
 import {
   Plus,
@@ -13,6 +14,7 @@ import {
 
 export default function AdminResourcesPage() {
   const { socket, addToast } = useSocket();
+  const { activeOrgId } = useOrganization();
 
   const [resources, setResources] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -38,6 +40,12 @@ export default function AdminResourcesPage() {
   const [submitting, setSubmitting] = useState(false);
 
   const fetchAllResources = useCallback(async () => {
+    if (!activeOrgId) {
+      setResources([]);
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
@@ -51,11 +59,15 @@ export default function AdminResourcesPage() {
     } finally {
       setLoading(false);
     }
-  }, [search]);
+  }, [activeOrgId, search]);
 
+  // Immediately clear stale resources on tenant switch
   useEffect(() => {
+    setResources([]);
+    setModalMode(null);
+    setEditingResource(null);
     fetchAllResources();
-  }, [fetchAllResources]);
+  }, [activeOrgId, fetchAllResources]);
 
   // Real-time status sync
   useEffect(() => {
@@ -194,12 +206,30 @@ export default function AdminResourcesPage() {
     }
   };
 
-  return (
+    const activeCount = resources.filter((r) => r.isActive).length;
+    const isLimitReached = activeCount >= 10;
+
+    return (
     <main className="main-content">
       <header className="dashboard-header">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
           <div>
-            <h1 className="greeting-title">Resource Inventory Management</h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <h1 className="greeting-title">Resource Inventory Management</h1>
+              <span
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  padding: '2px 8px',
+                  backgroundColor: isLimitReached ? '#FEF2F2' : 'var(--bg-subtle)',
+                  color: isLimitReached ? '#B91C1C' : 'var(--text-secondary)',
+                  border: '1px solid var(--border-medium)',
+                  borderRadius: 'var(--radius-full)'
+                }}
+              >
+                {activeCount} / 10 Active (Free Plan)
+              </span>
+            </div>
             <p className="greeting-sub">
               Administer shared office spaces, audio hardware, testing rigs, and displays.
             </p>

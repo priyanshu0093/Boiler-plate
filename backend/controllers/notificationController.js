@@ -2,9 +2,10 @@ const { Notification } = require('../models/Notification');
 const { emitNotificationToUser } = require('../socket/socketHandler');
 
 /**
- * Helper to persist notification and emit via Socket.IO
+ * Helper to persist notification and emit via Socket.IO (scoped to tenant)
  */
 const createAndSendNotification = async ({
+  organizationId,
   userId,
   bookingId = null,
   type,
@@ -15,7 +16,7 @@ const createAndSendNotification = async ({
   try {
     if (!userId) return null;
 
-    const notification = await Notification.create({
+    const notifData = {
       userId,
       bookingId,
       type,
@@ -23,7 +24,13 @@ const createAndSendNotification = async ({
       message,
       resourceName,
       isRead: false
-    });
+    };
+
+    if (organizationId) {
+      notifData.organizationId = organizationId;
+    }
+
+    const notification = await Notification.create(notifData);
 
     emitNotificationToUser(userId.toString(), notification);
     return notification;
@@ -34,18 +41,26 @@ const createAndSendNotification = async ({
 };
 
 /**
- * @desc    Get notifications for authenticated user
+ * @desc    Get notifications for authenticated user within current tenant
  * @route   GET /api/notifications
  * @access  Private
  */
 const getNotifications = async (req, res, next) => {
   try {
-    const notifications = await Notification.find({ userId: req.user._id })
+    const query = {
+      userId: req.user._id
+    };
+
+    if (req.organization) {
+      query.organizationId = req.organization._id;
+    }
+
+    const notifications = await Notification.find(query)
       .sort({ createdAt: -1 })
       .limit(50);
 
     const unreadCount = await Notification.countDocuments({
-      userId: req.user._id,
+      ...query,
       isRead: false
     });
 
@@ -61,16 +76,22 @@ const getNotifications = async (req, res, next) => {
 };
 
 /**
- * @desc    Mark a specific notification as read
+ * @desc    Mark a specific notification as read (scoped to user and tenant)
  * @route   PATCH /api/notifications/:id/read
  * @access  Private
  */
 const markAsRead = async (req, res, next) => {
   try {
-    const notification = await Notification.findOne({
+    const query = {
       _id: req.params.id,
       userId: req.user._id
-    });
+    };
+
+    if (req.organization) {
+      query.organizationId = req.organization._id;
+    }
+
+    const notification = await Notification.findOne(query);
 
     if (!notification) {
       return res.status(404).json({
@@ -82,10 +103,15 @@ const markAsRead = async (req, res, next) => {
     notification.isRead = true;
     await notification.save();
 
-    const unreadCount = await Notification.countDocuments({
+    const countQuery = {
       userId: req.user._id,
       isRead: false
-    });
+    };
+    if (req.organization) {
+      countQuery.organizationId = req.organization._id;
+    }
+
+    const unreadCount = await Notification.countDocuments(countQuery);
 
     res.status(200).json({
       success: true,
@@ -98,16 +124,22 @@ const markAsRead = async (req, res, next) => {
 };
 
 /**
- * @desc    Mark all authenticated user's notifications as read
+ * @desc    Mark all authenticated user's notifications as read within tenant
  * @route   PATCH /api/notifications/read-all
  * @access  Private
  */
 const markAllAsRead = async (req, res, next) => {
   try {
-    await Notification.updateMany(
-      { userId: req.user._id, isRead: false },
-      { $set: { isRead: true } }
-    );
+    const updateQuery = {
+      userId: req.user._id,
+      isRead: false
+    };
+
+    if (req.organization) {
+      updateQuery.organizationId = req.organization._id;
+    }
+
+    await Notification.updateMany(updateQuery, { $set: { isRead: true } });
 
     res.status(200).json({
       success: true,

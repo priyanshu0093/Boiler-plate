@@ -7,15 +7,16 @@ const {
   updateResource,
   deleteResource
 } = require('../controllers/resourceController');
-const { protect, requireAdmin } = require('../middleware/authMiddleware');
+const { protect, optionalProtect } = require('../middleware/authMiddleware');
+const { resolveTenant, requireTenantAdmin } = require('../middleware/tenantMiddleware');
 
 router.route('/')
-  .get(getResources)
-  .post(protect, requireAdmin, createResource);
+  .get(optionalProtect, resolveTenant, getResources)
+  .post(protect, resolveTenant, requireTenantAdmin, createResource);
 
 router.route('/:id')
-  .get(getResourceById)
-  .patch(protect, requireAdmin, updateResource)
-  .delete(protect, requireAdmin, deleteResource);
+  .get(optionalProtect, resolveTenant, getResourceById)
+  .patch(protect, resolveTenant, requireTenantAdmin, updateResource)
+  .delete(protect, resolveTenant, requireTenantAdmin, deleteResource);
 
 module.exports = router;

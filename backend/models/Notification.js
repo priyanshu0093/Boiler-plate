@@ -2,6 +2,12 @@ const mongoose = require('mongoose');
 
 const notificationSchema = new mongoose.Schema(
   {
+    organizationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Organization',
+      required: [true, 'Organization ID is required'],
+      index: true
+    },
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -50,8 +56,8 @@ const notificationSchema = new mongoose.Schema(
   }
 );
 
-// Compound index for querying user notifications sorted by recency
-notificationSchema.index({ userId: 1, createdAt: -1 });
+// Compound index for querying user notifications within organization sorted by recency
+notificationSchema.index({ organizationId: 1, userId: 1, createdAt: -1 });
 
 const Notification = mongoose.model('Notification', notificationSchema);
 

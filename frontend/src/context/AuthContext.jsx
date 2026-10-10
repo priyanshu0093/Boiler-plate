@@ -15,6 +15,7 @@ export function AuthProvider({ children }) {
     const handleAuthExpired = () => {
       setUser(null);
       setToken(null);
+      localStorage.removeItem('deskdrop_org_id');
     };
 
     window.addEventListener('deskdrop_auth_expired', handleAuthExpired);
@@ -62,11 +63,22 @@ export function AuthProvider({ children }) {
     return { success: false, message: res.message || 'Login failed' };
   };
 
+  const setSession = (userData, userToken, orgId) => {
+    setUser(userData);
+    setToken(userToken);
+    localStorage.setItem('deskdrop_token', userToken);
+    localStorage.setItem('deskdrop_user', JSON.stringify(userData));
+    if (orgId) {
+      localStorage.setItem('deskdrop_org_id', orgId);
+    }
+  };
+
   const logout = () => {
     setUser(null);
     setToken(null);
     localStorage.removeItem('deskdrop_token');
     localStorage.removeItem('deskdrop_user');
+    localStorage.removeItem('deskdrop_org_id');
   };
 
   const updateUser = (updatedUserData) => {
@@ -81,7 +93,8 @@ export function AuthProvider({ children }) {
     loading,
     login,
     logout,
-    updateUser
+    updateUser,
+    setSession
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

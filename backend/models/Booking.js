@@ -4,6 +4,12 @@ const BOOKING_STATUSES = ['CONFIRMED', 'ACTIVE', 'COMPLETED', 'CANCELLED', 'AUTO
 
 const bookingSchema = new mongoose.Schema(
   {
+    organizationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Organization',
+      required: [true, 'Organization ID is required'],
+      index: true
+    },
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -55,12 +61,16 @@ const bookingSchema = new mongoose.Schema(
   }
 );
 
-// Compound index for high-performance conflict detection queries
-bookingSchema.index({ resourceId: 1, status: 1, startTime: 1, endTime: 1 });
+// Compound indexes for high-performance conflict detection and user bookings scoped to organization
+bookingSchema.index({ organizationId: 1, resourceId: 1, status: 1, startTime: 1, endTime: 1 });
+bookingSchema.index({ organizationId: 1, userId: 1, startTime: -1 });
 
 const Booking = mongoose.model('Booking', bookingSchema);
+const { ResourceLock } = require('./ResourceLock');
 
 module.exports = {
   Booking,
-  BOOKING_STATUSES
+  BOOKING_STATUSES,
+  ResourceLock
 };
+

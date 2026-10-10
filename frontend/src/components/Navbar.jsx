@@ -1,5 +1,6 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useOrganization } from '../context/OrganizationContext';
 import { useSocket } from '../context/SocketContext';
 import { useNotifications } from '../context/NotificationContext';
 import { NavLink, Link } from 'react-router-dom';
@@ -8,8 +9,13 @@ import NotificationPanel from './NotificationPanel';
 
 export default function Navbar() {
   const { user, logout } = useAuth();
+  const { activeOrganization } = useOrganization();
   const { isConnected } = useSocket();
   const { unreadCount, isOpen, togglePanel } = useNotifications();
+
+  const isOrgAdmin =
+    user?.role === 'ADMIN' ||
+    (activeOrganization?.memberRole && ['OWNER', 'ADMIN'].includes(activeOrganization.memberRole));
 
   const getInitials = (name) => {
     if (!name) return 'E';
@@ -25,9 +31,12 @@ export default function Navbar() {
     <header className="navbar">
       <div className="navbar-inner">
         <div className="brand-section">
-          <Link to="/" style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
-            <span className="brand-title">DeskDrop</span>
-            <span className="brand-subtitle">Internal Office Resource Hub</span>
+          <Link to="/" className="navbar-brand-link" title="Boiler Plate">
+            <div className="brand-logo-badge">B</div>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <span className="brand-title">Boiler Plate</span>
+              <span className="brand-saas-badge">SaaS</span>
+            </div>
           </Link>
 
           {user && (
@@ -46,9 +55,9 @@ export default function Navbar() {
                 My Bookings
               </NavLink>
 
-              {user.role === 'ADMIN' && (
+              {isOrgAdmin && (
                 <>
-                  <span style={{ color: 'var(--border-medium)', margin: '0 4px', fontSize: 12 }}>|</span>
+                  <span className="nav-divider" aria-hidden="true" />
                   <NavLink
                     to="/admin"
                     end
@@ -67,6 +76,25 @@ export default function Navbar() {
                     className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
                   >
                     All Bookings
+                  </NavLink>
+                  <NavLink
+                    to="/admin/members"
+                    className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+                  >
+                    Members
+                  </NavLink>
+                </>
+              )}
+
+              {user?.role === 'ADMIN' && (
+                <>
+                  <span className="nav-divider" aria-hidden="true" />
+                  <NavLink
+                    to="/platform-admin"
+                    className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+                    style={{ color: '#2563EB', fontWeight: 600 }}
+                  >
+                    Platform Admin
                   </NavLink>
                 </>
               )}
@@ -96,7 +124,7 @@ export default function Navbar() {
                   aria-label={`Notifications, ${unreadCount} unread`}
                   aria-expanded={isOpen}
                 >
-                  <Bell size={17} />
+                  <Bell size={16} />
                   {unreadCount > 0 && (
                     <span className="notification-badge">
                       {unreadCount > 9 ? '9+' : unreadCount}
@@ -107,37 +135,34 @@ export default function Navbar() {
                 <NotificationPanel />
               </div>
 
+              {/* Current user / profile menu */}
               <Link
                 to="/profile"
                 className="user-profile"
                 title="View & Edit Profile"
-                style={{ textDecoration: 'none' }}
               >
                 <div
                   className="user-avatar"
                   style={{
-                    backgroundColor: user.role === 'ADMIN' ? '#1E3A8A' : 'var(--text-primary)'
+                    backgroundColor: isOrgAdmin ? '#1E3A8A' : 'var(--text-primary)'
                   }}
                 >
                   {getInitials(user.name)}
                 </div>
                 <div className="user-info">
                   <span className="user-name">{user.name}</span>
-                  <span className="user-role" style={{ color: user.role === 'ADMIN' ? '#2563EB' : 'var(--text-tertiary)', fontWeight: user.role === 'ADMIN' ? 700 : 500 }}>
-                    {user.role}
-                  </span>
                 </div>
               </Link>
 
+              {/* Compact Sign-out Action Button */}
               <button
                 type="button"
-                className="logout-btn"
+                className="nav-signout-btn"
                 onClick={logout}
-                title="Log out"
-                aria-label="Log out"
+                title="Sign out"
+                aria-label="Sign out"
               >
-                <LogOut size={14} />
-                <span>Exit</span>
+                <LogOut size={15} />
               </button>
             </>
           )}

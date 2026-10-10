@@ -7,7 +7,12 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "seed": "node seed/seedData.js"
+    "seed": "node seed/seedData.js",
+    "test": "node test_suite.js && node test_password_validation.js",
+    "test:password": "node test_password_validation.js",
+    "test:all": "node test_suite.js && node test_password_validation.js && node test_multitenant.js && node test_frontend_scenarios.js && node test_onboarding_invitations.js && node test_plan_limits_and_platform.js",
+    "migrate": "node scripts/migrateMultiTenant.js",
+    "migrate:dry-run": "node scripts/migrateMultiTenant.js --dry-run"
   },
   "keywords": [
     "deskdrop",

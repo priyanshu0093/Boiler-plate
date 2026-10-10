@@ -5,8 +5,11 @@ const path = require('path');
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
 const User = require('../models/User');
+const { Organization } = require('../models/Organization');
+const { OrganizationMember } = require('../models/OrganizationMember');
 const { Resource } = require('../models/Resource');
 const { Booking } = require('../models/Booking');
+const { Notification } = require('../models/Notification');
 
 const seedUsers = [
   {
@@ -195,8 +198,11 @@ const seed = async () => {
     await mongoose.connect(mongoUri);
 
     console.log('[Seed] Clearing existing collections...');
+    await Notification.deleteMany({});
     await Booking.deleteMany({});
     await Resource.deleteMany({});
+    await OrganizationMember.deleteMany({});
+    await Organization.deleteMany({});
     await User.deleteMany({});
 
     console.log('[Seed] Seeding employees...');
@@ -208,8 +214,39 @@ const seed = async () => {
     console.log(`[Seed] Created ${createdUsers.length} employees:`);
     createdUsers.forEach((u) => console.log(`  - ${u.name} (${u.email}) [Password: password123]`));
 
-    console.log('[Seed] Seeding office resources...');
-    const createdResources = await Resource.insertMany(seedResources);
+    console.log('[Seed] Seeding default organization...');
+    const adminUser = createdUsers.find((u) => u.role === 'ADMIN') || createdUsers[0];
+    const defaultOrg = await Organization.create({
+      name: 'DeskDrop Headquarters',
+      slug: 'deskdrop-hq',
+      owner: adminUser._id,
+      plan: 'ENTERPRISE',
+      status: 'ACTIVE',
+      settings: {
+        timezone: 'UTC',
+        bookingGraceMinutes: 15,
+        maxBookingDurationHours: 8,
+        allowGuestBookings: false
+      }
+    });
+    console.log(`[Seed] Created organization: ${defaultOrg.name} (${defaultOrg.slug})`);
+
+    console.log('[Seed] Creating organization memberships...');
+    for (const u of createdUsers) {
+      const role = u._id.equals(defaultOrg.owner) ? 'OWNER' : u.role === 'ADMIN' ? 'ADMIN' : 'MEMBER';
+      await OrganizationMember.create({
+        organizationId: defaultOrg._id,
+        userId: u._id,
+        role
+      });
+    }
+
+    console.log('[Seed] Seeding office resources with organizationId...');
+    const resourcesWithOrg = seedResources.map((r) => ({
+      ...r,
+      organizationId: defaultOrg._id
+    }));
+    const createdResources = await Resource.insertMany(resourcesWithOrg);
     console.log(`[Seed] Created ${createdResources.length} resources:`);
     createdResources.forEach((r) => console.log(`  - [${r.category}] ${r.name} (${r.location})`));
 

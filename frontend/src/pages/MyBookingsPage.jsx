@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { getMyBookings, checkInBooking, checkOutBooking, cancelBooking } from '../api/client';
 import { useSocket } from '../context/SocketContext';
+import { useOrganization } from '../context/OrganizationContext';
 import StatusBadge from '../components/StatusBadge';
 import {
   Calendar,
@@ -15,6 +16,7 @@ import {
 
 export default function MyBookingsPage() {
   const { socket, addToast } = useSocket();
+  const { activeOrgId } = useOrganization();
 
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -22,8 +24,14 @@ export default function MyBookingsPage() {
   const [activeTab, setActiveTab] = useState('ALL');
   const [actionLoadingId, setActionLoadingId] = useState(null);
 
-  // Fetch employee bookings
+  // Fetch employee bookings for active tenant organization
   const fetchBookings = useCallback(async () => {
+    if (!activeOrgId) {
+      setBookings([]);
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
@@ -37,11 +45,13 @@ export default function MyBookingsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeOrgId]);
 
+  // Immediately clear stale bookings on tenant switch
   useEffect(() => {
+    setBookings([]);
     fetchBookings();
-  }, [fetchBookings]);
+  }, [activeOrgId, fetchBookings]);
 
   // Real-Time Socket.IO event synchronization without page refresh
   useEffect(() => {

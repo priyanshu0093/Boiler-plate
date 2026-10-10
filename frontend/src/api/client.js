@@ -2,12 +2,16 @@ const API_BASE_URL = 'http://localhost:5000/api';
 
 /**
  * Core HTTP client for DeskDrop API
+ * Attaches token and active tenant organization header dynamically from storage on every request
  */
 async function request(endpoint, options = {}) {
   const token = localStorage.getItem('deskdrop_token');
+  const orgId = localStorage.getItem('deskdrop_org_id');
+
   const headers = {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(orgId ? { 'x-organization-id': orgId } : {}),
     ...(options.headers || {})
   };
 
@@ -24,10 +28,11 @@ async function request(endpoint, options = {}) {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    // If token expired / unauthorized, clear token
+    // If token expired / unauthorized, clear token and organization state
     if (response.status === 401 && !endpoint.includes('/auth/login')) {
       localStorage.removeItem('deskdrop_token');
       localStorage.removeItem('deskdrop_user');
+      localStorage.removeItem('deskdrop_org_id');
       window.dispatchEvent(new Event('deskdrop_auth_expired'));
     }
 
@@ -40,6 +45,84 @@ async function request(endpoint, options = {}) {
   return data;
 }
 
+// Tenant Organization API
+export const getUserOrganizations = async () => {
+  return await request('/organizations');
+};
+
+export const getCurrentOrganization = async () => {
+  return await request('/organizations/current');
+};
+
+export const createOrganization = async (orgData) => {
+  return await request('/organizations', {
+    method: 'POST',
+    body: orgData
+  });
+};
+
+export const updateCurrentOrganization = async (data) => {
+  return await request('/organizations/current', {
+    method: 'PATCH',
+    body: data
+  });
+};
+
+export const getOrganizationMembers = async () => {
+  return await request('/organizations/current/members');
+};
+
+export const addOrganizationMember = async (memberData) => {
+  return await request('/organizations/current/members', {
+    method: 'POST',
+    body: memberData
+  });
+};
+
+export const updateOrganizationMemberRole = async (memberId, role) => {
+  return await request(`/organizations/current/members/${memberId}`, {
+    method: 'PATCH',
+    body: { role }
+  });
+};
+
+export const removeOrganizationMember = async (memberId) => {
+  return await request(`/organizations/current/members/${memberId}`, {
+    method: 'DELETE'
+  });
+};
+
+// Workspace Invitations API
+export const getOrganizationInvitations = async () => {
+  return await request('/organizations/current/invitations');
+};
+
+export const createOrganizationInvitation = async ({ email, role }) => {
+  return await request('/organizations/current/invitations', {
+    method: 'POST',
+    body: { email, role }
+  });
+};
+
+export const revokeOrganizationInvitation = async (invitationId) => {
+  return await request(`/organizations/current/invitations/${invitationId}`, {
+    method: 'DELETE'
+  });
+};
+
+export const verifyInvitationToken = async (token, email) => {
+  const params = new URLSearchParams({ token });
+  if (email) params.append('email', email);
+  return await request(`/invitations/verify?${params.toString()}`);
+};
+
+export const acceptInvitation = async (payload) => {
+  return await request('/invitations/accept', {
+    method: 'POST',
+    body: payload
+  });
+};
+
 // Authentication API
 export const authLogin = async (email, password) => {
   return await request('/auth/login', {
@@ -48,10 +131,10 @@ export const authLogin = async (email, password) => {
   });
 };
 
-export const authRegister = async ({ name, email, password, confirmPassword }) => {
+export const authRegister = async ({ name, email, password, confirmPassword, organizationName }) => {
   return await request('/auth/register', {
     method: 'POST',
-    body: { name, email, password, confirmPassword }
+    body: { name, email, password, confirmPassword, organizationName }
   });
 };
 
@@ -190,7 +273,33 @@ export const markAllNotificationsAsRead = async () => {
   });
 };
 
+// Platform Super Admin API
+export const getPlatformMetrics = async () => {
+  return await request('/platform/metrics');
+};
+
+export const getPlatformOrganizations = async () => {
+  return await request('/platform/organizations');
+};
+
+export const getPlatformOrganizationDetails = async (id) => {
+  return await request(`/platform/organizations/${id}`);
+};
+
+export const updatePlatformOrganizationStatus = async (id, status) => {
+  return await request(`/platform/organizations/${id}/status`, {
+    method: 'PATCH',
+    body: { status }
+  });
+};
+
 export default {
+  getUserOrganizations,
+  getCurrentOrganization,
+  createOrganization,
+  updateCurrentOrganization,
+  getOrganizationMembers,
+  addOrganizationMember,
   authLogin,
   authRegister,
   getCurrentUser,

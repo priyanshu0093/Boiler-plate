@@ -1,17 +1,20 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { getAllBookingsAdmin, cancelBooking, updateBookingAdmin } from '../api/client';
 import { useSocket } from '../context/SocketContext';
+import { useOrganization } from '../context/OrganizationContext';
 import StatusBadge from '../components/StatusBadge';
 import {
   User,
   XCircle,
   Edit2,
   X,
-  Search
+  Search,
+  AlertCircle
 } from 'lucide-react';
 
 export default function AdminBookingsPage() {
   const { socket, addToast } = useSocket();
+  const { activeOrgId } = useOrganization();
 
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -26,6 +29,12 @@ export default function AdminBookingsPage() {
   const [confirmCancelId, setConfirmCancelId] = useState(null);
 
   const fetchAllBookings = useCallback(async () => {
+    if (!activeOrgId) {
+      setBookings([]);
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
@@ -41,11 +50,13 @@ export default function AdminBookingsPage() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter]);
+  }, [activeOrgId, statusFilter]);
 
+  // Immediately clear stale bookings on tenant switch
   useEffect(() => {
+    setBookings([]);
     fetchAllBookings();
-  }, [fetchAllBookings]);
+  }, [activeOrgId, fetchAllBookings]);
 
   // Real-time synchronization
   useEffect(() => {
@@ -193,6 +204,26 @@ export default function AdminBookingsPage() {
           </div>
         </div>
       </header>
+
+      {error && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '12px 16px',
+            backgroundColor: '#FEF2F2',
+            border: '1px solid #FEE2E2',
+            borderRadius: 'var(--radius-md)',
+            color: '#B91C1C',
+            fontSize: 13,
+            marginBottom: 20
+          }}
+        >
+          <AlertCircle size={16} style={{ flexShrink: 0 }} />
+          <span>{error}</span>
+        </div>
+      )}
 
       {/* Bookings Table */}
       <section style={{ backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-light)', borderRadius: 'var(--radius-md)', overflowX: 'auto' }}>

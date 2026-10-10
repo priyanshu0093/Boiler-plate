@@ -12,6 +12,9 @@ const { initSocket } = require('./socket/socketHandler');
 const { notFound, errorHandler } = require('./middleware/errorMiddleware');
 
 const authRoutes = require('./routes/authRoutes');
+const organizationRoutes = require('./routes/organizationRoutes');
+const invitationRoutes = require('./routes/invitationRoutes');
+const platformRoutes = require('./routes/platformRoutes');
 const resourceRoutes = require('./routes/resourceRoutes');
 const bookingRoutes = require('./routes/bookingRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
@@ -50,6 +53,9 @@ app.get('/health', (req, res) => {
 
 // API Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/organizations', organizationRoutes);
+app.use('/api/invitations', invitationRoutes);
+app.use('/api/platform', platformRoutes);
 app.use('/api/resources', resourceRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/notifications', notificationRoutes);
