@@ -14,11 +14,9 @@ import {
   UserPlus,
   Mail,
   Trash2,
-  Copy,
   Check,
   AlertCircle,
-  X,
-  Info
+  X
 } from 'lucide-react';
 
 export default function WorkspaceMembersPage() {
@@ -37,8 +35,6 @@ export default function WorkspaceMembersPage() {
   const [inviteRole, setInviteRole] = useState('MEMBER');
   const [inviteSubmitting, setInviteSubmitting] = useState(false);
   const [inviteError, setInviteError] = useState('');
-  const [createdPreviewUrl, setCreatedPreviewUrl] = useState('');
-  const [copiedLink, setCopiedLink] = useState(false);
 
   // Check if current user is Owner or Admin in the active organization
   const isOwner =
@@ -123,7 +119,6 @@ export default function WorkspaceMembersPage() {
   const handleInviteSubmit = async (e) => {
     e.preventDefault();
     setInviteError('');
-    setCreatedPreviewUrl('');
 
     if (!inviteEmail.trim()) {
       setInviteError('Please enter a recipient email.');
@@ -138,19 +133,16 @@ export default function WorkspaceMembersPage() {
       });
 
       if (res.success) {
+        const sentEmail = res.data?.invitation?.email || inviteEmail.trim();
         setInviteEmail('');
-        if (res.data?.invitationUrl) {
-          setCreatedPreviewUrl(res.data.invitationUrl);
-        } else {
-          setIsInviteModalOpen(false);
-          setSuccessMsg(`Invitation sent to ${res.data?.invitation?.email}`);
-        }
+        setIsInviteModalOpen(false);
+        setSuccessMsg(res.message || `Invitation email sent successfully to ${sentEmail}`);
         await loadData();
       } else {
-        setInviteError(res.message || 'Failed to create invitation');
+        setInviteError(res.message || 'Failed to send invitation email');
       }
     } catch (err) {
-      setInviteError(err.message || 'Failed to create invitation');
+      setInviteError(err.message || 'Failed to send invitation email');
     } finally {
       setInviteSubmitting(false);
     }
@@ -172,12 +164,6 @@ export default function WorkspaceMembersPage() {
     }
   };
 
-  // Copy link helper
-  const handleCopy = (text) => {
-    navigator.clipboard.writeText(text);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2500);
-  };
 
   return (
     <div className="main-content">
@@ -648,163 +634,33 @@ export default function WorkspaceMembersPage() {
               </button>
             </div>
 
-            {createdPreviewUrl ? (
-              // Development Preview Link
-              <div>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '10px 12px',
-                    backgroundColor: '#EFF6FF',
-                    border: '1px solid #DBEAFE',
-                    borderRadius: 'var(--radius-md)',
-                    color: '#1D4ED8',
-                    fontSize: 12.5,
-                    marginBottom: 16
-                  }}
-                >
-                  <Info size={16} style={{ flexShrink: 0 }} />
-                  <span>
-                    Email service not configured in this environment. Use the preview link below to test or distribute.
-                  </span>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Single-Use Invitation Link</label>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={createdPreviewUrl}
-                      readOnly
-                      style={{ fontSize: 12, backgroundColor: 'var(--bg-subtle)' }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => handleCopy(createdPreviewUrl)}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        padding: '8px 14px',
-                        backgroundColor: copiedLink ? '#15803D' : 'var(--text-primary)',
-                        color: 'var(--text-inverse)',
-                        borderRadius: 'var(--radius-sm)',
-                        fontSize: 12.5,
-                        fontWeight: 600,
-                        whiteSpace: 'nowrap'
-                      }}
-                    >
-                      {copiedLink ? <Check size={14} /> : <Copy size={14} />}
-                      <span>{copiedLink ? 'Copied' : 'Copy'}</span>
-                    </button>
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsInviteModalOpen(false);
-                      setCreatedPreviewUrl('');
-                    }}
-                    style={{
-                      padding: '8px 16px',
-                      backgroundColor: 'var(--text-primary)',
-                      color: 'var(--text-inverse)',
-                      borderRadius: 'var(--radius-sm)',
-                      fontSize: 13,
-                      fontWeight: 600
-                    }}
-                  >
-                    Done
-                  </button>
-                </div>
-              </div>
-            ) : (
-              // Invitation Form
-              <form onSubmit={handleInviteSubmit}>
+            <form onSubmit={handleInviteSubmit}>
                 {inviteError && (
-                  <div
-                    style={{
-                      padding: '8px 12px',
-                      backgroundColor: '#FEF2F2',
-                      border: '1px solid #FEE2E2',
-                      borderRadius: 'var(--radius-sm)',
-                      color: '#B91C1C',
-                      fontSize: 12.5,
-                      marginBottom: 14
-                    }}
-                  >
+                  <div style={{ padding: "8px 12px", backgroundColor: "#FEF2F2", border: "1px solid #FEE2E2", borderRadius: "var(--radius-sm)", color: "#B91C1C", fontSize: 12.5, marginBottom: 14 }}>
                     {inviteError}
                   </div>
                 )}
 
                 <div className="form-group">
-                  <label className="form-label" htmlFor="inviteEmail">
-                    Teammate Work Email
-                  </label>
-                  <input
-                    id="inviteEmail"
-                    type="email"
-                    className="form-input"
-                    placeholder="colleague@company.com"
-                    value={inviteEmail}
-                    onChange={(e) => setInviteEmail(e.target.value)}
-                    required
-                  />
+                  <label className="form-label" htmlFor="inviteEmail">Teammate Work Email</label>
+                  <input id="inviteEmail" type="email" className="form-input" placeholder="colleague@company.com" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} required disabled={inviteSubmitting} />
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label" htmlFor="inviteRole">
-                    Workspace Role
-                  </label>
-                  <select
-                    id="inviteRole"
-                    className="form-input"
-                    value={inviteRole}
-                    onChange={(e) => setInviteRole(e.target.value)}
-                  >
+                  <label className="form-label" htmlFor="inviteRole">Workspace Role</label>
+                  <select id="inviteRole" className="form-input" value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} disabled={inviteSubmitting}>
                     <option value="MEMBER">Member (Can book resources)</option>
-                    <option value="ADMIN">Admin (Can manage resources & members)</option>
+                    <option value="ADMIN">Admin (Can manage resources &amp; members)</option>
                   </select>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 24 }}>
-                  <button
-                    type="button"
-                    onClick={() => setIsInviteModalOpen(false)}
-                    style={{
-                      padding: '8px 16px',
-                      border: '1px solid var(--border-medium)',
-                      borderRadius: 'var(--radius-sm)',
-                      fontSize: 13,
-                      fontWeight: 500,
-                      color: 'var(--text-secondary)'
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={inviteSubmitting || members.length >= 15}
-                    style={{
-                      padding: '8px 18px',
-                      backgroundColor: members.length >= 15 ? 'var(--bg-subtle)' : 'var(--text-primary)',
-                      color: members.length >= 15 ? 'var(--text-tertiary)' : 'var(--text-inverse)',
-                      borderRadius: 'var(--radius-sm)',
-                      fontSize: 13,
-                      fontWeight: 600,
-                      cursor: (inviteSubmitting || members.length >= 15) ? 'not-allowed' : 'pointer'
-                    }}
-                  >
-                    {inviteSubmitting ? 'Creating Invite...' : 'Send Invitation'}
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 24 }}>
+                  <button type="button" onClick={() => setIsInviteModalOpen(false)} disabled={inviteSubmitting} style={{ padding: "8px 16px", border: "1px solid var(--border-medium)", borderRadius: "var(--radius-sm)", fontSize: 13, fontWeight: 500, color: "var(--text-secondary)" }}>Cancel</button>
+                  <button type="submit" disabled={inviteSubmitting || members.length >= 15} style={{ padding: "8px 18px", backgroundColor: members.length >= 15 ? "var(--bg-subtle)" : "var(--text-primary)", color: members.length >= 15 ? "var(--text-tertiary)" : "var(--text-inverse)", borderRadius: "var(--radius-sm)", fontSize: 13, fontWeight: 600, cursor: (inviteSubmitting || members.length >= 15) ? "not-allowed" : "pointer" }}>
+                    {inviteSubmitting ? "Sending Invitation Email…" : "Send Invitation"}
                   </button>
                 </div>
               </form>
-            )}
           </div>
         </div>
       )}

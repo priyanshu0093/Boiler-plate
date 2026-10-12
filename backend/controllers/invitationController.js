@@ -6,6 +6,11 @@ const { OrganizationMember } = require('../models/OrganizationMember');
 const User = require('../models/User');
 const { getPlanLimits } = require('../config/planLimits');
 const { validatePassword } = require('../utils/passwordValidator');
+const {
+  sendInvitationEmail,
+  isEmailConfigured,
+  getFrontendUrl
+} = require('../utils/emailService');
 
 // Concurrency mutex lock per organization for invitation acceptance and quota enforcement
 const orgMemberLocks = new Map();
@@ -136,47 +141,53 @@ const createInvitation = async (req, res, next) => {
       expiresAt
     });
 
-    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
-    const invitationUrl = `${clientUrl}/invitations/accept?token=${rawToken}&email=${encodeURIComponent(normalizedEmail)}`;
+    const frontendBaseUrl = getFrontendUrl();
+    const invitationUrl = `${frontendBaseUrl}/invitations/accept?token=${rawToken}`;
 
-    // Check if external SMTP / email provider is configured
-    const hasSmtpConfigured = Boolean(process.env.SMTP_HOST && process.env.SMTP_USER);
+    // Real email delivery if external SMTP provider is configured
+    if (isEmailConfigured()) {
+      try {
+        await sendInvitationEmail({
+          to: normalizedEmail,
+          organizationName: req.organization.name,
+          inviterName: req.user.name || 'Workspace Administrator',
+          role: normalizedRole,
+          invitationUrl,
+          expiresDays
+        });
 
-    if (hasSmtpConfigured) {
-      // In production with SMTP configured, send actual email here
-      return res.status(201).json({
-        success: true,
-        message: `Invitation email sent to ${normalizedEmail}`,
-        data: {
-          invitation: {
-            _id: invitation._id,
-            email: invitation.email,
-            role: invitation.role,
-            status: invitation.status,
-            expiresAt: invitation.expiresAt,
-            createdAt: invitation.createdAt
-          },
-          deliveryMethod: 'EMAIL'
-        }
-      });
+        // Email successfully delivered: do NOT return raw tokens or invitationUrl
+        return res.status(201).json({
+          success: true,
+          message: `Invitation email sent to ${normalizedEmail}`,
+          data: {
+            invitation: {
+              _id: invitation._id,
+              email: invitation.email,
+              role: invitation.role,
+              status: invitation.status,
+              expiresAt: invitation.expiresAt,
+              createdAt: invitation.createdAt
+            },
+            deliveryMethod: 'EMAIL'
+          }
+        });
+      } catch (deliveryError) {
+        // Rollback invitation on delivery failure to avoid leaving dead pending invites
+        await Invitation.findByIdAndDelete(invitation._id);
+        return res.status(502).json({
+          success: false,
+          message: `Failed to deliver invitation email to ${normalizedEmail}: ${deliveryError.message || 'SMTP delivery failed'}. Please verify SMTP settings.`
+        });
+      }
     }
 
-    // Development / Local preview mode: Return invitationUrl explicitly without claiming an email was sent
-    res.status(201).json({
-      success: true,
-      message: 'Invitation created. Email provider not configured in this environment; development link generated for direct testing/copying.',
-      data: {
-        invitation: {
-          _id: invitation._id,
-          email: invitation.email,
-          role: invitation.role,
-          status: invitation.status,
-          expiresAt: invitation.expiresAt,
-          createdAt: invitation.createdAt
-        },
-        invitationUrl,
-        deliveryMethod: 'DEV_PREVIEW'
-      }
+    // If SMTP email service is not configured, do not fall back to DEV_PREVIEW
+    // Delete created invitation so we don't leave inactive pending invites
+    await Invitation.findByIdAndDelete(invitation._id);
+    return res.status(503).json({
+      success: false,
+      message: 'Email service is not configured. Please configure SMTP credentials (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM) in backend/.env to send invitation emails.'
     });
   } catch (error) {
     next(error);
@@ -371,7 +382,8 @@ const acceptInvitation = async (req, res, next) => {
       });
     }
 
-    let user = null;
+    let targetUser = null;
+    let isNewUser = false;
 
     // Case 1: Caller is authenticated via Bearer token
     if (req.user) {
@@ -381,7 +393,7 @@ const acceptInvitation = async (req, res, next) => {
           message: `This invitation was issued to ${invitation.email}, but you are currently signed in as ${req.user.email}. Please sign out or switch accounts.`
         });
       }
-      user = req.user;
+      targetUser = req.user;
     } else {
       // Case 2: Unauthenticated - check if user exists by email
       const existingUser = await User.findOne({ email: invitation.email });
@@ -402,7 +414,7 @@ const acceptInvitation = async (req, res, next) => {
             message: 'Invalid password. Please check your credentials.'
           });
         }
-        user = existingUser;
+        targetUser = existingUser;
       } else {
         // Case 3: New user registration
         if (!name || !name.trim() || !password) {
@@ -428,12 +440,7 @@ const acceptInvitation = async (req, res, next) => {
           });
         }
 
-        user = await User.create({
-          name: name.trim(),
-          email: invitation.email,
-          password,
-          role: 'EMPLOYEE'
-        });
+        isNewUser = true;
       }
     }
 
@@ -441,33 +448,42 @@ const acceptInvitation = async (req, res, next) => {
     const releaseLock = await acquireOrgMemberLock(invitation.organizationId._id);
 
     try {
-      // Check if user is already an active member of this organization
-      const alreadyMember = await OrganizationMember.findOne({
-        organizationId: invitation.organizationId._id,
-        userId: user._id
-      });
-
-      if (!alreadyMember) {
-        const limits = getPlanLimits(invitation.organizationId.plan);
-        const memberCount = await OrganizationMember.countDocuments({
-          organizationId: invitation.organizationId._id
+      // Check if user is already an active member of this organization (if existing user)
+      if (targetUser) {
+        const alreadyMember = await OrganizationMember.findOne({
+          organizationId: invitation.organizationId._id,
+          userId: targetUser._id
         });
 
-        if (memberCount >= limits.maxMembers) {
+        if (alreadyMember) {
           releaseLock();
           return res.status(400).json({
             success: false,
-            code: 'MEMBER_LIMIT_EXCEEDED',
-            message: `Free plan limit reached: Maximum ${limits.maxMembers} members allowed per organization. Contact workspace administrator.`,
-            data: {
-              current: memberCount,
-              limit: limits.maxMembers
-            }
+            message: `User is already a member of this workspace (${alreadyMember.role})`
           });
         }
       }
 
-      // Atomically transition invitation to ACCEPTED to prevent concurrent acceptance / race conditions
+      // Check organization plan limits before mutating database state
+      const limits = getPlanLimits(invitation.organizationId.plan);
+      const memberCount = await OrganizationMember.countDocuments({
+        organizationId: invitation.organizationId._id
+      });
+
+      if (memberCount >= limits.maxMembers) {
+        releaseLock();
+        return res.status(400).json({
+          success: false,
+          code: 'MEMBER_LIMIT_EXCEEDED',
+          message: `Free plan limit reached: Maximum ${limits.maxMembers} members allowed per organization. Contact workspace administrator.`,
+          data: {
+            current: memberCount,
+            limit: limits.maxMembers
+          }
+        });
+      }
+
+      // Atomically transition invitation to ACCEPTED to prevent concurrent acceptance / double-use
       const updatedInvitation = await Invitation.findOneAndUpdate(
         {
           _id: invitation._id,
@@ -477,8 +493,7 @@ const acceptInvitation = async (req, res, next) => {
         {
           $set: {
             status: 'ACCEPTED',
-            acceptedAt: new Date(),
-            acceptedBy: user._id
+            acceptedAt: new Date()
           }
         },
         { new: true }
@@ -488,40 +503,81 @@ const acceptInvitation = async (req, res, next) => {
         releaseLock();
         return res.status(409).json({
           success: false,
-          message: 'This invitation is already being processed or has expired'
+          message: 'This invitation has already been processed or has expired'
         });
       }
 
-      // Add or update organization membership
-      const membership = await OrganizationMember.findOneAndUpdate(
-        {
-          organizationId: invitation.organizationId._id,
-          userId: user._id
-        },
-        {
-          $set: {
-            role: invitation.role,
-            joinedAt: new Date()
-          }
-        },
-        {
-          new: true,
-          upsert: true
+      // If new user, create User account now (bcrypt pre-save hook handles password hash)
+      let newlyCreatedUser = null;
+      if (isNewUser) {
+        try {
+          newlyCreatedUser = await User.create({
+            name: name.trim(),
+            email: invitation.email,
+            password,
+            role: 'EMPLOYEE'
+          });
+          targetUser = newlyCreatedUser;
+        } catch (createUserErr) {
+          // Revert invitation status back to PENDING so user can retry without corrupted state
+          await Invitation.updateOne(
+            { _id: invitation._id },
+            { $set: { status: 'PENDING' }, $unset: { acceptedAt: 1 } }
+          );
+          releaseLock();
+          throw createUserErr;
         }
+      }
+
+      // Record acceptedBy user reference
+      await Invitation.updateOne(
+        { _id: invitation._id },
+        { $set: { acceptedBy: targetUser._id } }
       );
+
+      // Add organization membership with the role authorized by the invitation
+      let membership = null;
+      try {
+        membership = await OrganizationMember.findOneAndUpdate(
+          {
+            organizationId: invitation.organizationId._id,
+            userId: targetUser._id
+          },
+          {
+            $set: {
+              role: invitation.role,
+              joinedAt: new Date()
+            }
+          },
+          {
+            new: true,
+            upsert: true
+          }
+        );
+      } catch (memberErr) {
+        // Rollback: delete created user if membership failed to prevent partial state
+        if (newlyCreatedUser) {
+          await User.findByIdAndDelete(newlyCreatedUser._id);
+        }
+        await Invitation.updateOne(
+          { _id: invitation._id },
+          { $set: { status: 'PENDING' }, $unset: { acceptedAt: 1, acceptedBy: 1 } }
+        );
+        releaseLock();
+        throw memberErr;
+      }
 
       releaseLock();
 
-      const authToken = generateToken(user);
-      const orgs = await getUserOrganizationSummaries(user._id);
-
+      const authToken = generateToken(targetUser);
+      const orgs = await getUserOrganizationSummaries(targetUser._id);
       const activeOrg = orgs.find((o) => o._id.toString() === invitation.organizationId._id.toString()) || orgs[0];
 
       res.status(200).json({
         success: true,
         message: `Successfully joined ${invitation.organizationId.name}!`,
         data: {
-          user,
+          user: targetUser,
           token: authToken,
           membership,
           organizations: orgs,

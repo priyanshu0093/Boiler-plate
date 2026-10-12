@@ -30,9 +30,27 @@ initSocket(server);
 
 // Security and Logging Middleware
 app.use(helmet());
+
+// CORS configuration supporting CLIENT_URL and FRONTEND_URL, with multi-origin support
+const allowedOrigins = [
+  ...(process.env.CLIENT_URL ? process.env.CLIENT_URL.split(',').map((s) => s.trim()) : []),
+  ...(process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',').map((s) => s.trim()) : [])
+];
+
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || '*',
+    origin: (origin, callback) => {
+      // Allow non-browser requests (mobile apps, server-to-server, curl)
+      if (!origin) return callback(null, true);
+      // In non-production or if wildcard / empty list, allow all
+      if (process.env.NODE_ENV !== 'production' || allowedOrigins.includes('*') || allowedOrigins.length === 0) {
+        return callback(null, true);
+      }
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error(`CORS policy does not allow access from origin ${origin}`));
+    },
     credentials: true
   })
 );
@@ -40,7 +58,10 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 if (process.env.NODE_ENV !== 'test') {
-  app.use(morgan('dev'));
+  // Invitation verification tokens are sent in the query string; never log them.
+  app.use(morgan('dev', {
+    skip: (req) => req.path === '/api/invitations/verify'
+  }));
 }
 
 // Health Check Endpoint

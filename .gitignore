@@ -42,3 +42,6 @@ tokens.json
 .vscode/
 *.swp
 *.swo
+node_modules/
+.env
+*.log
